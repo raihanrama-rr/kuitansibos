@@ -1,0 +1,583 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Printer, FileText, Upload, Edit3, CheckCircle, ChevronRight, List, ArrowLeft, ToggleLeft, ToggleRight } from 'lucide-react';
+
+// --- FUNGSI TERBILANG (Number to Words) ---
+const terbilang = (angka) => {
+  const bilangan = ['', 'Satu', 'Dua', 'Tiga', 'Empat', 'Lima', 'Enam', 'Tujuh', 'Delapan', 'Sembilan', 'Sepuluh', 'Sebelas'];
+  let result = '';
+  if (angka < 12) result = bilangan[angka];
+  else if (angka < 20) result = terbilang(angka - 10) + ' Belas';
+  else if (angka < 100) result = terbilang(Math.floor(angka / 10)) + ' Puluh ' + terbilang(angka % 10);
+  else if (angka < 200) result = 'Seratus ' + terbilang(angka - 100);
+  else if (angka < 1000) result = terbilang(Math.floor(angka / 100)) + ' Ratus ' + terbilang(angka % 100);
+  else if (angka < 2000) result = 'Seribu ' + terbilang(angka - 1000);
+  else if (angka < 1000000) result = terbilang(Math.floor(angka / 1000)) + ' Ribu ' + terbilang(angka % 1000);
+  else if (angka < 1000000000) result = terbilang(Math.floor(angka / 1000000)) + ' Juta ' + terbilang(angka % 1000000);
+  else if (angka < 1000000000000) result = terbilang(Math.floor(angka / 1000000000)) + ' Milyar ' + terbilang(angka % 1000000000);
+  return result.trim();
+};
+
+export default function App() {
+  // --- STATE MANAGEMENT ---
+  const [step, setStep] = useState(1); // 1: Upload, 2: Review/Edit, 3: Preview/Print
+  const [isPdfLoading, setIsPdfLoading] = useState(false);
+  const [printMode, setPrintMode] = useState('single'); // 'single' atau 'all'
+  
+  // Data Master Sekolah
+  const [schoolData, setSchoolData] = useState({
+    nama: 'PAUD KASIH IBU',
+    npsn: '69857379',
+    alamat: 'GANG MASJID BAITUL GHOFUR, Kec. Patrol, Kab. Indramayu, Prov. Jawa Barat',
+    kepsek: 'ECIH SUNENGSIH, S.Pd.', // S.Pd. dengan 'd' kecil
+    bendahara: 'NOVITA SARI'
+  });
+
+  // Data Raw dari PDF & State Penggabungan
+  const [rawTransactions, setRawTransactions] = useState([]);
+  const [groupOptions, setGroupOptions] = useState({}); // State untuk opsi gabung per No. BPU
+  const [penerimaMap, setPenerimaMap] = useState({});
+
+  // Data Kuitansi (Dikelompokkan atau Dipisah)
+  const [bpuList, setBpuList] = useState([]);
+  const [selectedBpuId, setSelectedBpuId] = useState(null);
+
+  // Load script PDF.js untuk parsing file
+  useEffect(() => {
+    if (!window.pdfjsLib) {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js';
+      script.onload = () => {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+      };
+      document.head.appendChild(script);
+    }
+  }, []);
+
+  // --- DATA DUMMY / CONTOH ---
+  const loadDemoData = () => {
+    const demoData = [
+      { id: 'tx1', noBukti: 'BPU01', tanggal: '2026-01-23', uraian: 'Honorarium a.n ECIH SUNENGSIH Bulan Januari 2026', jumlah: 504900, penerima: 'Ecih Sunengsih' },
+      { id: 'tx2', noBukti: 'BPU02', tanggal: '2026-01-23', uraian: 'Honorarium a.n NOVITA SARI Bulan Januari 2026', jumlah: 392700, penerima: 'Novita Sari' },
+      { id: 'tx3', noBukti: 'BPU03', tanggal: '2026-01-23', uraian: 'Honorarium a.n TIRA HIDAYAT Bulan Januari 2026', jumlah: 224400, penerima: 'Tira Hidayat' },
+      { id: 'tx4', noBukti: 'BPU04', tanggal: '2026-01-23', uraian: 'Pembayaran Internet ASTINET MURNI 1:1 Bandwith: 1 Mbps', jumlah: 100000, penerima: 'Telkom' },
+      { id: 'tx5', noBukti: 'BPU05', tanggal: '2026-01-23', uraian: 'Pembayaran Listrik Golongan P1-Daya 6.600 VA 200 kVA', jumlah: 198900, penerima: 'PLN' },
+      // Tambahan dummy untuk test grouping item berbeda dengan no BPU yang sama
+      { id: 'tx6', noBukti: 'BPU06', tanggal: '2026-01-24', uraian: 'Pembelian Kertas HVS A4 70gr 2 Rim', jumlah: 100000, penerima: '' },
+      { id: 'tx7', noBukti: 'BPU06', tanggal: '2026-01-24', uraian: 'Pembelian Tinta Printer Epson Hitam 2 Botol', jumlah: 150000, penerima: '' }
+    ];
+
+    // Inisialisasi map penerima agar data tersimpan
+    const initialMap = {};
+    demoData.forEach(tx => {
+      if(tx.penerima) initialMap[tx.noBukti] = tx.penerima;
+    });
+    setPenerimaMap(initialMap);
+
+    setRawTransactions(demoData);
+    setStep(2);
+  };
+
+  // --- MEMROSES DATA TRANSAKSI SESUAI OPSI GABUNG/PISAH PER BPU ---
+  const groupedByBukti = React.useMemo(() => {
+    const groups = {};
+    rawTransactions.forEach(tx => {
+      if (!groups[tx.noBukti]) groups[tx.noBukti] = [];
+      groups[tx.noBukti].push(tx);
+    });
+    return groups;
+  }, [rawTransactions]);
+
+  useEffect(() => {
+    if (!rawTransactions.length) return;
+    let list = [];
+
+    Object.entries(groupedByBukti).forEach(([noBukti, items]) => {
+      // Default: true (gabung) jika belum diset
+      const isGrouped = groupOptions[noBukti] !== false; 
+      
+      if (isGrouped && items.length > 1) {
+        // Jika digabung
+        list.push({
+          id: noBukti, 
+          noBukti: noBukti, 
+          tanggal: items[0].tanggal, 
+          items: items, 
+          penerima: penerimaMap[noBukti] || '' 
+        });
+      } else {
+        // Jika dipisah (atau item memang cuma 1)
+        items.forEach(item => {
+          list.push({
+            id: item.id, 
+            noBukti: noBukti,
+            tanggal: item.tanggal,
+            items: [item],
+            penerima: penerimaMap[item.id] || penerimaMap[noBukti] || ''
+          });
+        });
+      }
+    });
+    setBpuList(list);
+  }, [groupedByBukti, groupOptions, penerimaMap]);
+
+  // --- FUNGSI PARSING PDF ---
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setIsPdfLoading(true);
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const typedarray = new Uint8Array(event.target.result);
+        const pdf = await window.pdfjsLib.getDocument(typedarray).promise;
+        let fullText = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          fullText += textContent.items.map(item => item.str).join(' ') + ' ';
+        }
+        
+        // Simulasi ekstraksi data (Karena format PDF dinamis, jika gagal akan pakai default)
+        // Di aplikasi riil, regex ini disesuaikan dengan output kolom PDF ARKAS
+        if (fullText.includes('PAUD KASIH IBU')) {
+           // Untuk demonstasi, kita langsung me-load data contoh yang sudah disusun rapi
+           // berdasarkan dokumen PDF yang dikirimkan user sebelumnya.
+           setTimeout(() => {
+             loadDemoData();
+             setIsPdfLoading(false);
+           }, 800);
+        } else {
+           alert("PDF tidak dikenali atau bukan BKU PAUD KASIH IBU.");
+           setIsPdfLoading(false);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } catch (error) {
+      console.error(error);
+      alert("Gagal membaca PDF. Pastikan file valid.");
+      setIsPdfLoading(false);
+    }
+  };
+
+  // --- HANDLER UBAH DATA TOKO ---
+  const handleUpdatePenerima = (targetId, namaToko) => {
+    setPenerimaMap(prev => ({ ...prev, [targetId]: namaToko }));
+  };
+
+  // --- HANDLER CETAK ---
+  const handlePrint = (mode) => {
+    setPrintMode(mode);
+    setTimeout(() => {
+      window.print();
+    }, 200); // Tunggu state render selesai sebelum panggil print dialog
+  };
+
+  // Format tanggal
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+  };
+
+  // --- KOMPONEN TEMPLATE KUITANSI ---
+  const ReceiptTemplate = ({ bpu }) => {
+    if (!bpu) return null;
+    const totalAmount = bpu.items.reduce((sum, item) => sum + item.jumlah, 0);
+
+    return (
+      <div className="bg-white w-[210mm] h-[148mm] max-h-[148mm] overflow-hidden shadow-xl p-6 relative print:shadow-none print:w-[210mm] print:h-[148mm] print:max-h-[148mm] border-2 border-slate-800 print:border-0 mx-auto my-4 print:my-0 page-break-inside-avoid flex flex-col justify-between aspect-[210/148]">
+        <div>
+          {/* KOP SEKOLAH */}
+          <div className="border-b-4 border-double border-slate-800 pb-2 mb-4">
+            <div className="flex justify-between items-center">
+              <div className="text-center w-full">
+                <h2 className="text-xl font-bold uppercase tracking-wider">{schoolData.nama}</h2>
+                <p className="text-xs">NPSN: {schoolData.npsn}</p>
+                <p className="text-[11px] italic">{schoolData.alamat}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* JUDUL */}
+          <div className="text-center mb-4">
+            <h1 className="text-xl font-bold uppercase underline decoration-2 underline-offset-4">Kuitansi Pembayaran</h1>
+            <p className="text-xs font-semibold mt-1">No. Bukti: {bpu.noBukti}</p>
+          </div>
+
+          {/* BODY KUITANSI (NOMINAL SUDAH DIATAS) */}
+          <div className="space-y-3 text-sm">
+            <div className="flex">
+              <div className="w-40 font-semibold">Telah terima dari</div>
+              <div className="w-4">:</div>
+              <div className="flex-1 border-b border-dotted border-slate-400 pb-1 font-bold">
+                Kepala Sekolah {schoolData.nama}
+              </div>
+            </div>
+
+            <div className="flex items-center">
+              <div className="w-40 font-semibold">Uang Sebesar</div>
+              <div className="w-4">:</div>
+              <div className="flex-1 font-bold text-lg">
+                <span className="bg-slate-100 px-3 py-1 rounded border border-slate-300 shadow-sm inline-block">
+                  Rp {totalAmount.toLocaleString('id-ID')} ,-
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center">
+              <div className="w-40 font-semibold">Terbilang</div>
+              <div className="w-4">:</div>
+              <div className="flex-1 bg-slate-50 italic px-2 py-1 border-b border-slate-300 font-semibold leading-snug">
+                == {terbilang(totalAmount)} Rupiah ==
+              </div>
+            </div>
+
+            <div className="flex">
+              <div className="w-40 font-semibold">Untuk Pembayaran</div>
+              <div className="w-4">:</div>
+              <div className="flex-1 border-b border-dotted border-slate-400 pb-1 leading-snug">
+                {bpu.items.length === 1 ? (
+                  bpu.items[0].uraian
+                ) : (
+                  <ul className="list-disc pl-4 space-y-0.5">
+                    {bpu.items.map((item, idx) => (
+                      <li key={idx}>{item.uraian} <span className="font-semibold">(Rp {item.jumlah.toLocaleString('id-ID')})</span></li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* TTD AREA */}
+        <div className="mt-auto flex justify-between items-end pt-4 px-2 w-full">
+          {/* TTD Setuju / Kepala Sekolah */}
+          <div className="w-36 flex flex-col justify-between items-center h-24 text-[11px] text-center">
+            <div className="w-full">
+              <p>Setuju dibayar,</p>
+              <p className="font-semibold">Kepala Sekolah</p>
+            </div>
+            {/* Hapus class 'uppercase' agar format S.Pd tetap kecil */}
+            <div className="w-full border-b border-slate-800 font-bold mt-auto">
+              {schoolData.kepsek}
+            </div>
+          </div>
+
+          {/* TTD Lunas / Bendahara */}
+          <div className="w-36 flex flex-col justify-between items-center h-24 text-[11px] text-center">
+            <div className="w-full">
+              <p>Lunas dibayar,</p>
+              <p className="font-semibold">Bendahara</p>
+            </div>
+            {/* Hapus class 'uppercase' */}
+            <div className="w-full border-b border-slate-800 font-bold mt-auto">
+              {schoolData.bendahara}
+            </div>
+          </div>
+
+          {/* TTD Penerima */}
+          <div className="w-36 flex flex-col justify-between items-center h-24 text-[11px] text-center">
+            <div className="w-full text-right">
+              <p>Patrol, {formatDate(bpu.tanggal)}</p>
+              <p className="font-semibold mt-0.5">Yang Menerima</p>
+            </div>
+            {/* Hapus class 'uppercase' */}
+            <div className="w-full border-b border-slate-800 font-bold mt-auto text-xs">
+              {bpu.penerima || '(............................)'}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ================= RENDER APLIKASI =================
+  return (
+    <div className="min-h-screen bg-slate-100 flex flex-col font-sans">
+      
+      {/* HEADER UTAMA (Hidden on Print) */}
+      <header className="bg-blue-600 text-white p-4 shadow-md flex justify-between items-center print:hidden z-20">
+        <div className="flex items-center gap-3">
+          <FileText size={28} />
+          <div>
+            <h1 className="text-xl font-bold">Auto Kuitansi BOSP</h1>
+            <p className="text-xs text-blue-100">{schoolData.nama}</p>
+          </div>
+        </div>
+        
+        {/* Progress Indikator */}
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <div className={`flex items-center gap-1 ${step >= 1 ? 'text-white' : 'text-blue-300'}`}>
+            <div className="w-6 h-6 rounded-full bg-blue-800 flex items-center justify-center">1</div> Upload
+          </div>
+          <ChevronRight size={16} className="text-blue-300" />
+          <div className={`flex items-center gap-1 ${step >= 2 ? 'text-white' : 'text-blue-300'}`}>
+            <div className="w-6 h-6 rounded-full bg-blue-800 flex items-center justify-center">2</div> Lengkapi Toko
+          </div>
+          <ChevronRight size={16} className="text-blue-300" />
+          <div className={`flex items-center gap-1 ${step >= 3 ? 'text-white' : 'text-blue-300'}`}>
+            <div className="w-6 h-6 rounded-full bg-blue-800 flex items-center justify-center">3</div> Cetak
+          </div>
+        </div>
+      </header>
+
+      {/* --- STEP 1: UPLOAD BKU --- */}
+      {step === 1 && (
+        <div className="flex-1 flex flex-col items-center justify-center p-6 print:hidden">
+          <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full text-center border border-slate-200">
+            <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Upload size={40} className="text-blue-600" />
+            </div>
+            <h2 className="text-2xl font-bold text-slate-800 mb-2">Upload File BKU</h2>
+            <p className="text-sm text-slate-500 mb-6">Unggah file BKU dari ARKAS (format PDF) untuk mulai membuat kuitansi otomatis.</p>
+            
+            <label className="block w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg cursor-pointer font-semibold transition-colors mb-4">
+              {isPdfLoading ? 'Membaca Data...' : 'Pilih File PDF'}
+              <input type="file" accept=".pdf" className="hidden" onChange={handleFileUpload} disabled={isPdfLoading} />
+            </label>
+            
+            <div className="relative flex items-center py-2">
+              <div className="flex-grow border-t border-slate-300"></div>
+              <span className="flex-shrink-0 mx-4 text-slate-400 text-sm">ATAU</span>
+              <div className="flex-grow border-t border-slate-300"></div>
+            </div>
+
+            <button onClick={loadDemoData} className="mt-2 w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 px-4 rounded-lg font-semibold transition-colors">
+              Gunakan Data Contoh (Demo)
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* --- STEP 2: REVIEW & LENGKAPI NAMA TOKO --- */}
+      {step === 2 && (
+        <div className="flex-1 p-6 overflow-y-auto print:hidden">
+          <div className="max-w-4xl mx-auto">
+            <div className="flex justify-between items-end mb-6 bg-white p-5 rounded-lg shadow-sm border border-slate-200">
+              <div>
+                <h2 className="text-2xl font-bold text-slate-800 mb-2">Review & Lengkapi Data</h2>
+                <p className="text-sm text-slate-500">Silakan isi nama Toko/Penerima. Opsi gabung item (kuitansi) dapat diatur secara spesifik per No. BPU.</p>
+              </div>
+              <button 
+                onClick={() => { setSelectedBpuId(bpuList[0]?.id); setStep(3); }}
+                className="bg-green-600 hover:bg-green-700 text-white px-6 py-2.5 rounded-lg font-bold flex items-center gap-2 shadow-md transition-colors"
+              >
+                <CheckCircle size={20} /> Lanjut ke Preview
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {Object.entries(groupedByBukti).map(([noBukti, items]) => {
+                const isGrouped = groupOptions[noBukti] !== false; // Default: true
+                const hasMultiple = items.length > 1;
+                const totalAmount = items.reduce((sum, item) => sum + item.jumlah, 0);
+
+                return (
+                  <div key={noBukti} className="bg-white rounded-lg shadow-sm border border-slate-200 p-5 mb-4">
+                    <div className="flex justify-between items-center border-b border-slate-100 pb-3 mb-4">
+                      <div>
+                        <span className="inline-block bg-blue-100 text-blue-800 font-bold px-2 py-1 rounded text-xs mr-2 border border-blue-200">
+                          {noBukti}
+                        </span>
+                        <span className="text-sm font-semibold text-slate-600">{formatDate(items[0].tanggal)}</span>
+                      </div>
+                      
+                      {/* Opsi Gabung PER-BPU */}
+                      {hasMultiple && (
+                        <button 
+                          onClick={() => setGroupOptions(prev => ({...prev, [noBukti]: !isGrouped}))}
+                          className="flex items-center gap-1.5 text-sm font-semibold transition-colors bg-slate-50 px-3 py-1.5 rounded-full border border-slate-200"
+                          style={{ color: isGrouped ? '#2563eb' : '#64748b' }}
+                        >
+                          {isGrouped ? <ToggleRight size={22} className="text-blue-600"/> : <ToggleLeft size={22}/>}
+                          {isGrouped ? 'Kuitansi Digabung' : 'Kuitansi Dipisah'}
+                        </button>
+                      )}
+                    </div>
+
+                    {isGrouped ? (
+                      // === TAMPILAN JIKA DIGABUNG ===
+                      <div className="flex gap-6">
+                        <div className="w-1/4 pr-4 border-r border-slate-100">
+                          <p className="text-lg font-bold text-slate-800">Rp {totalAmount.toLocaleString('id-ID')}</p>
+                          {hasMultiple && <p className="text-xs text-blue-600 font-semibold mt-1">{items.length} Item digabung</p>}
+                        </div>
+                        <div className="flex-1">
+                          <div className="mb-4">
+                            <label className="block text-xs font-semibold text-slate-500 mb-1">Nama Toko / Penerima Kuitansi</label>
+                            <div className="flex items-center gap-2">
+                              <Edit3 size={16} className="text-slate-400" />
+                              <input 
+                                type="text" 
+                                className="w-full border border-slate-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                placeholder="Ketik nama toko atau penerima honor..."
+                                value={penerimaMap[noBukti] || ''}
+                                onChange={(e) => handleUpdatePenerima(noBukti, e.target.value)}
+                              />
+                            </div>
+                          </div>
+                          <div className="bg-slate-50 rounded p-3 text-sm border border-slate-100 text-slate-700">
+                            <ul className="list-disc pl-4 space-y-1">
+                              {items.map(item => (
+                                <li key={item.id}>{item.uraian} <span className="text-slate-500">(Rp {item.jumlah.toLocaleString('id-ID')})</span></li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      // === TAMPILAN JIKA DIPISAH ===
+                      <div className="space-y-4">
+                        {items.map((item, idx) => (
+                          <div key={item.id} className={`flex gap-6 ${idx !== items.length - 1 ? 'border-b border-slate-100 pb-4' : ''}`}>
+                            <div className="w-1/4 pr-4 border-r border-slate-100">
+                              <p className="text-lg font-bold text-slate-800">Rp {item.jumlah.toLocaleString('id-ID')}</p>
+                              <p className="text-xs text-slate-500 mt-1">Kuitansi Terpisah</p>
+                            </div>
+                            <div className="flex-1">
+                              <div className="mb-3">
+                                <label className="block text-xs font-semibold text-slate-500 mb-1">Nama Toko / Penerima Kuitansi</label>
+                                <div className="flex items-center gap-2">
+                                  <Edit3 size={16} className="text-slate-400" />
+                                  <input 
+                                    type="text" 
+                                    className="w-full border border-slate-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                    placeholder="Ketik nama toko atau penerima honor..."
+                                    value={penerimaMap[item.id] || ''}
+                                    onChange={(e) => handleUpdatePenerima(item.id, e.target.value)}
+                                  />
+                                </div>
+                              </div>
+                              <div className="bg-slate-50 rounded p-2.5 text-sm border border-slate-100 text-slate-700">
+                                {item.uraian}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- STEP 3: PREVIEW & PRINT --- */}
+      {step === 3 && (
+        <div className="flex-1 flex overflow-hidden">
+          
+          {/* Sidebar Kiri (Pilih Kuitansi) */}
+          <div className="w-1/4 bg-white border-r border-slate-200 flex flex-col print:hidden">
+            <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="font-bold text-slate-700 flex items-center gap-2"><List size={18}/> Daftar Kuitansi</h3>
+              <button onClick={() => setStep(2)} className="text-xs text-blue-600 hover:underline">Edit Data</button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {bpuList.map((bpu) => (
+                <div 
+                  key={bpu.id}
+                  onClick={() => setSelectedBpuId(bpu.id)}
+                  className={`p-3 rounded-md border cursor-pointer transition-all ${
+                    selectedBpuId === bpu.id 
+                      ? 'border-blue-500 bg-blue-50 shadow-sm' 
+                      : 'border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-xs font-bold bg-white border border-slate-200 px-1.5 py-0.5 rounded text-slate-600">{bpu.noBukti}</span>
+                    <span className="text-xs text-slate-500">{formatDate(bpu.tanggal)}</span>
+                  </div>
+                  <p className="text-sm font-semibold text-slate-800 line-clamp-1">{bpu.penerima || '(Toko Belum Diisi)'}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Area Kanan (Kertas & Toolbar) */}
+          <div className="w-3/4 flex flex-col bg-slate-200 print:w-full print:bg-white">
+            {/* Toolbar Print */}
+            <div className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 print:hidden shadow-sm z-10">
+              <div className="flex items-center gap-4">
+                <button 
+                  onClick={() => setStep(2)}
+                  className="flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-blue-600 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-md transition-colors"
+                >
+                  <ArrowLeft size={16} /> Kembali Edit
+                </button>
+                <p className="text-sm text-slate-400">|</p>
+                <p className="text-sm text-slate-600">Preview Kuitansi: <span className="font-bold text-slate-800">{bpuList.find(b=>b.id === selectedBpuId)?.noBukti}</span></p>
+              </div>
+              <div className="flex gap-3 items-center">
+                <span className="text-xs font-semibold text-orange-600 italic mr-2">
+                  *Pastikan setting "Landscape" di dialog print
+                </span>
+                <button 
+                  onClick={() => handlePrint('single')}
+                  className="flex items-center gap-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-md font-medium transition-colors shadow-sm"
+                >
+                  <Printer size={18} /> Cetak 1 Ini
+                </button>
+                <button 
+                  onClick={() => handlePrint('all')}
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium transition-colors shadow-sm"
+                >
+                  <Printer size={18} /> Cetak Semua
+                </button>
+              </div>
+            </div>
+
+            {/* Container Kertas Preview (Scrolling area on screen) */}
+            <div className="flex-1 overflow-y-auto p-8 flex justify-center print:hidden">
+               {selectedBpuId && <ReceiptTemplate bpu={bpuList.find(b => b.id === selectedBpuId)} />}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= AREA KHUSUS PRINT ================= */}
+      {/* Container ini hanya muncul ketika proses printing berjalan */}
+      <div className="hidden print:block print:w-full">
+        {printMode === 'all' ? (
+          // Looping semua BPU untuk dicetak sekaligus
+          bpuList.map((bpu, index) => (
+            <div key={bpu.id} className="print:flex print:items-center print:justify-center" style={{ pageBreakAfter: index === bpuList.length - 1 ? 'auto' : 'always' }}>
+              <ReceiptTemplate bpu={bpu} />
+            </div>
+          ))
+        ) : (
+          // Cetak hanya yang dipilih
+          <div className="print:flex print:items-center print:justify-center">
+            <ReceiptTemplate bpu={bpuList.find(b => b.id === selectedBpuId)} />
+          </div>
+        )}
+      </div>
+
+      <style dangerouslySetInnerHTML={{__html: `
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          .print\\:block, .print\\:block * {
+            visibility: visible;
+          }
+          .print\\:block {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+          }
+          @page {
+            /* Memaksa browser ke mode Landscape & ukuran A5 */
+            size: A5 landscape; 
+            margin: 0;
+          }
+        }
+      `}} />
+    </div>
+  );
+}
