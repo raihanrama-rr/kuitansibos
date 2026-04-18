@@ -20,19 +20,23 @@
     <style>
         /* CSS KHUSUS PRINT */
         @media print {
-            body * { visibility: hidden; }
-            .print-block, .print-block * { visibility: visible; }
-            .print-block {
-                position: absolute;
-                left: 0;
-                top: 0;
-                width: 100%;
+            /* Sembunyikan semua tombol dan elemen web saat ngeprint */
+            #app-ui { display: none !important; }
+            
+            /* Tampilkan KHUSUS area kuitansi saat ngeprint */
+            #print-section { 
+                display: block !important; 
+                position: absolute; 
+                left: 0; 
+                top: 0; 
+                width: 100%; 
             }
             @page {
                 /* Paksa kertas ke A5 Landscape */
-                size: A5 landscape; 
+                size: 210mm 148mm; 
                 margin: 0;
             }
+            body { background-color: white !important; }
         }
     </style>
 </head>
@@ -214,122 +218,126 @@
             };
 
             return (
-                <div className="min-h-screen flex flex-col font-sans">
-                    <header className="bg-blue-600 text-white p-4 shadow-md flex justify-between items-center print:hidden z-20">
-                        <div className="flex items-center gap-3">
-                            <IconFileText />
-                            <div><h1 className="text-xl font-bold">Auto Kuitansi BOSP</h1><p className="text-xs text-blue-100">{schoolData.nama}</p></div>
-                        </div>
-                    </header>
-
-                    {step === 1 && (
-                        <div className="flex-1 flex flex-col items-center justify-center p-6 print:hidden">
-                            <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full text-center border border-slate-200">
-                                <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6 text-blue-600"><IconUpload /></div>
-                                <h2 className="text-2xl font-bold text-slate-800 mb-2">Upload File BKU</h2>
-                                <p className="text-sm text-slate-500 mb-6">Unggah file PDF dari ARKAS.</p>
-                                <label className="block w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg cursor-pointer font-semibold transition-colors mb-4">
-                                    {isPdfLoading ? 'Membaca...' : 'Pilih File PDF'}
-                                    <input type="file" accept=".pdf" className="hidden" onChange={handleFileUpload} disabled={isPdfLoading} />
-                                </label>
-                                <button onClick={loadDemoData} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 px-4 rounded-lg font-semibold">Gunakan Data Contoh (Demo)</button>
+                <div className="font-sans">
+                    {/* BAGIAN UI WEB (Tampil di layar, sembunyi pas print) */}
+                    <div id="app-ui" className="min-h-screen flex flex-col bg-slate-100">
+                        <header className="bg-blue-600 text-white p-4 shadow-md flex justify-between items-center z-20">
+                            <div className="flex items-center gap-3">
+                                <IconFileText />
+                                <div><h1 className="text-xl font-bold">Auto Kuitansi BOSP</h1><p className="text-xs text-blue-100">{schoolData.nama}</p></div>
                             </div>
-                        </div>
-                    )}
+                        </header>
 
-                    {step === 2 && (
-                        <div className="flex-1 p-6 overflow-y-auto print:hidden">
-                            <div className="max-w-4xl mx-auto">
-                                <div className="flex justify-between items-end mb-6 bg-white p-5 rounded-lg shadow-sm border border-slate-200">
-                                    <div>
-                                        <h2 className="text-2xl font-bold text-slate-800 mb-2">Lengkapi Data Toko</h2>
-                                        <p className="text-sm text-slate-500">Isi penerima. Bisa atur opsi gabung kuitansi per-BPU.</p>
-                                    </div>
-                                    <button onClick={() => { setSelectedBpuId(bpuList[0]?.id); setStep(3); }} className="bg-green-600 hover:bg-green-700 text-white px-6 py-2.5 rounded-lg font-bold flex items-center gap-2">
-                                        <IconCheck /> Lanjut Preview
-                                    </button>
+                        {step === 1 && (
+                            <div className="flex-1 flex flex-col items-center justify-center p-6 print:hidden">
+                                <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full text-center border border-slate-200">
+                                    <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6 text-blue-600"><IconUpload /></div>
+                                    <h2 className="text-2xl font-bold text-slate-800 mb-2">Upload File BKU</h2>
+                                    <p className="text-sm text-slate-500 mb-6">Unggah file PDF dari ARKAS.</p>
+                                    <label className="block w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg cursor-pointer font-semibold transition-colors mb-4">
+                                        {isPdfLoading ? 'Membaca...' : 'Pilih File PDF'}
+                                        <input type="file" accept=".pdf" className="hidden" onChange={handleFileUpload} disabled={isPdfLoading} />
+                                    </label>
+                                    <button onClick={loadDemoData} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 px-4 rounded-lg font-semibold">Gunakan Data Contoh (Demo)</button>
                                 </div>
-                                <div className="space-y-4">
-                                    {Object.entries(groupedByBukti).map(([noBukti, items]) => {
-                                        const isGrouped = groupOptions[noBukti] !== false;
-                                        const hasMultiple = items.length > 1;
-                                        const totalAmount = items.reduce((sum, item) => sum + item.jumlah, 0);
-                                        return (
-                                            <div key={noBukti} className="bg-white rounded-lg shadow-sm border border-slate-200 p-5 mb-4">
-                                                <div className="flex justify-between items-center border-b border-slate-100 pb-3 mb-4">
-                                                    <div>
-                                                        <span className="inline-block bg-blue-100 text-blue-800 font-bold px-2 py-1 rounded text-xs mr-2 border border-blue-200">{noBukti}</span>
-                                                        <span className="text-sm font-semibold text-slate-600">{formatDate(items[0].tanggal)}</span>
-                                                    </div>
-                                                    {hasMultiple && (
-                                                        <button onClick={() => setGroupOptions(prev => ({...prev, [noBukti]: !isGrouped}))} className="flex items-center gap-1.5 text-sm font-semibold bg-slate-50 px-3 py-1.5 rounded-full border border-slate-200">
-                                                            {isGrouped ? <IconToggleOn /> : <IconToggleOff />} {isGrouped ? 'Kuitansi Digabung' : 'Kuitansi Dipisah'}
-                                                        </button>
-                                                    )}
-                                                </div>
-                                                {isGrouped ? (
-                                                    <div className="flex gap-6">
-                                                        <div className="w-1/4 pr-4 border-r border-slate-100">
-                                                            <p className="text-lg font-bold text-slate-800">Rp {totalAmount.toLocaleString('id-ID')}</p>
+                            </div>
+                        )}
+
+                        {step === 2 && (
+                            <div className="flex-1 p-6 overflow-y-auto print:hidden">
+                                <div className="max-w-4xl mx-auto">
+                                    <div className="flex justify-between items-end mb-6 bg-white p-5 rounded-lg shadow-sm border border-slate-200">
+                                        <div>
+                                            <h2 className="text-2xl font-bold text-slate-800 mb-2">Lengkapi Data Toko</h2>
+                                            <p className="text-sm text-slate-500">Isi penerima. Bisa atur opsi gabung kuitansi per-BPU.</p>
+                                        </div>
+                                        <button onClick={() => { setSelectedBpuId(bpuList[0]?.id); setStep(3); }} className="bg-green-600 hover:bg-green-700 text-white px-6 py-2.5 rounded-lg font-bold flex items-center gap-2">
+                                            <IconCheck /> Lanjut Preview
+                                        </button>
+                                    </div>
+                                    <div className="space-y-4">
+                                        {Object.entries(groupedByBukti).map(([noBukti, items]) => {
+                                            const isGrouped = groupOptions[noBukti] !== false;
+                                            const hasMultiple = items.length > 1;
+                                            const totalAmount = items.reduce((sum, item) => sum + item.jumlah, 0);
+                                            return (
+                                                <div key={noBukti} className="bg-white rounded-lg shadow-sm border border-slate-200 p-5 mb-4">
+                                                    <div className="flex justify-between items-center border-b border-slate-100 pb-3 mb-4">
+                                                        <div>
+                                                            <span className="inline-block bg-blue-100 text-blue-800 font-bold px-2 py-1 rounded text-xs mr-2 border border-blue-200">{noBukti}</span>
+                                                            <span className="text-sm font-semibold text-slate-600">{formatDate(items[0].tanggal)}</span>
                                                         </div>
-                                                        <div className="flex-1">
-                                                            <input type="text" className="w-full border border-slate-300 rounded-md p-2 text-sm mb-3" placeholder="Ketik nama toko / penerima..." value={penerimaMap[noBukti] || ''} onChange={(e) => handleUpdatePenerima(noBukti, e.target.value)} />
-                                                            <div className="bg-slate-50 rounded p-3 text-sm text-slate-700">
-                                                                <ul className="list-disc pl-4 space-y-1">
-                                                                    {items.map(item => <li key={item.id}>{item.uraian}</li>)}
-                                                                </ul>
+                                                        {hasMultiple && (
+                                                            <button onClick={() => setGroupOptions(prev => ({...prev, [noBukti]: !isGrouped}))} className="flex items-center gap-1.5 text-sm font-semibold bg-slate-50 px-3 py-1.5 rounded-full border border-slate-200">
+                                                                {isGrouped ? <IconToggleOn /> : <IconToggleOff />} {isGrouped ? 'Kuitansi Digabung' : 'Kuitansi Dipisah'}
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    {isGrouped ? (
+                                                        <div className="flex gap-6">
+                                                            <div className="w-1/4 pr-4 border-r border-slate-100">
+                                                                <p className="text-lg font-bold text-slate-800">Rp {totalAmount.toLocaleString('id-ID')}</p>
                                                             </div>
-                                                        </div>
-                                                    </div>
-                                                ) : (
-                                                    <div className="space-y-4">
-                                                        {items.map((item, idx) => (
-                                                            <div key={item.id} className="flex gap-6 border-b border-slate-100 pb-4">
-                                                                <div className="w-1/4 pr-4 border-r border-slate-100"><p className="text-lg font-bold text-slate-800">Rp {item.jumlah.toLocaleString('id-ID')}</p></div>
-                                                                <div className="flex-1">
-                                                                    <input type="text" className="w-full border border-slate-300 rounded-md p-2 text-sm mb-2" placeholder="Nama toko..." value={penerimaMap[item.id] || ''} onChange={(e) => handleUpdatePenerima(item.id, e.target.value)} />
-                                                                    <div className="bg-slate-50 rounded p-2 text-sm text-slate-700">{item.uraian}</div>
+                                                            <div className="flex-1">
+                                                                <input type="text" className="w-full border border-slate-300 rounded-md p-2 text-sm mb-3" placeholder="Ketik nama toko / penerima..." value={penerimaMap[noBukti] || ''} onChange={(e) => handleUpdatePenerima(noBukti, e.target.value)} />
+                                                                <div className="bg-slate-50 rounded p-3 text-sm text-slate-700">
+                                                                    <ul className="list-disc pl-4 space-y-1">
+                                                                        {items.map(item => <li key={item.id}>{item.uraian}</li>)}
+                                                                    </ul>
                                                                 </div>
                                                             </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {step === 3 && (
-                        <div className="flex-1 flex overflow-hidden">
-                            <div className="w-1/4 bg-white border-r border-slate-200 flex flex-col print:hidden">
-                                <div className="p-4 border-b border-slate-100 bg-slate-50 font-bold text-slate-700">Daftar Kuitansi</div>
-                                <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                                    {bpuList.map((bpu) => (
-                                        <div key={bpu.id} onClick={() => setSelectedBpuId(bpu.id)} className={`p-3 rounded-md border cursor-pointer ${selectedBpuId === bpu.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200'}`}>
-                                            <div className="flex justify-between items-center mb-1"><span className="text-xs font-bold bg-white border border-slate-200 px-1.5 py-0.5 rounded text-slate-600">{bpu.noBukti}</span></div>
-                                            <p className="text-sm font-semibold text-slate-800">{bpu.penerima || '(Toko Belum Diisi)'}</p>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                            <div className="w-3/4 flex flex-col bg-slate-200 print:w-full print:bg-white">
-                                <div className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 print:hidden">
-                                    <button onClick={() => setStep(2)} className="flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-blue-600 bg-slate-100 px-3 py-1.5 rounded-md"><IconBack /> Edit</button>
-                                    <div className="flex gap-3 items-center">
-                                        <span className="text-xs font-semibold text-orange-600 italic mr-2">*Set Landscape di dialog print</span>
-                                        <button onClick={() => handlePrint('single')} className="flex items-center gap-2 bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-md font-medium"><IconPrinter /> Cetak 1 Ini</button>
-                                        <button onClick={() => handlePrint('all')} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md font-medium"><IconPrinter /> Cetak Semua</button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="space-y-4">
+                                                            {items.map((item, idx) => (
+                                                                <div key={item.id} className="flex gap-6 border-b border-slate-100 pb-4">
+                                                                    <div className="w-1/4 pr-4 border-r border-slate-100"><p className="text-lg font-bold text-slate-800">Rp {item.jumlah.toLocaleString('id-ID')}</p></div>
+                                                                    <div className="flex-1">
+                                                                        <input type="text" className="w-full border border-slate-300 rounded-md p-2 text-sm mb-2" placeholder="Nama toko..." value={penerimaMap[item.id] || ''} onChange={(e) => handleUpdatePenerima(item.id, e.target.value)} />
+                                                                        <div className="bg-slate-50 rounded p-2 text-sm text-slate-700">{item.uraian}</div>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 </div>
-                                <div className="flex-1 overflow-y-auto p-8 print:hidden">{selectedBpuId && <ReceiptTemplate bpu={bpuList.find(b => b.id === selectedBpuId)} />}</div>
                             </div>
-                        </div>
-                    )}
+                        )}
 
-                    <div className="hidden print-block">
+                        {step === 3 && (
+                            <div className="flex-1 flex overflow-hidden">
+                                <div className="w-1/4 bg-white border-r border-slate-200 flex flex-col print:hidden">
+                                    <div className="p-4 border-b border-slate-100 bg-slate-50 font-bold text-slate-700">Daftar Kuitansi</div>
+                                    <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                                        {bpuList.map((bpu) => (
+                                            <div key={bpu.id} onClick={() => setSelectedBpuId(bpu.id)} className={`p-3 rounded-md border cursor-pointer ${selectedBpuId === bpu.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200'}`}>
+                                                <div className="flex justify-between items-center mb-1"><span className="text-xs font-bold bg-white border border-slate-200 px-1.5 py-0.5 rounded text-slate-600">{bpu.noBukti}</span></div>
+                                                <p className="text-sm font-semibold text-slate-800">{bpu.penerima || '(Toko Belum Diisi)'}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="w-3/4 flex flex-col bg-slate-200 print:w-full print:bg-white">
+                                    <div className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 print:hidden">
+                                        <button onClick={() => setStep(2)} className="flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-blue-600 bg-slate-100 px-3 py-1.5 rounded-md"><IconBack /> Edit</button>
+                                        <div className="flex gap-3 items-center">
+                                            <span className="text-xs font-semibold text-orange-600 italic mr-2">*Set Landscape di dialog print</span>
+                                            <button onClick={() => handlePrint('single')} className="flex items-center gap-2 bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-md font-medium"><IconPrinter /> Cetak 1 Ini</button>
+                                            <button onClick={() => handlePrint('all')} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md font-medium"><IconPrinter /> Cetak Semua</button>
+                                        </div>
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto p-8">{selectedBpuId && <ReceiptTemplate bpu={bpuList.find(b => b.id === selectedBpuId)} />}</div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* BAGIAN KHUSUS CETAK (Tampil pas print aja) */}
+                    <div id="print-section" className="hidden">
                         {printMode === 'all' ? bpuList.map((bpu, index) => (
                             <div key={bpu.id} style={{ pageBreakAfter: index === bpuList.length - 1 ? 'auto' : 'always' }}><ReceiptTemplate bpu={bpu} /></div>
                         )) : <ReceiptTemplate bpu={bpuList.find(b => b.id === selectedBpuId)} />}
