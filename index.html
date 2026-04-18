@@ -93,9 +93,6 @@
                 const demoData = [
                     { id: 'tx1', noBukti: 'BPU01', tanggal: '2026-01-23', uraian: 'Honorarium a.n ECIH SUNENGSIH Bulan Januari 2026', jumlah: 504900, penerima: 'Ecih Sunengsih' },
                     { id: 'tx2', noBukti: 'BPU02', tanggal: '2026-01-23', uraian: 'Honorarium a.n NOVITA SARI Bulan Januari 2026', jumlah: 392700, penerima: 'Novita Sari' },
-                    { id: 'tx3', noBukti: 'BPU03', tanggal: '2026-01-23', uraian: 'Honorarium a.n TIRA HIDAYAT Bulan Januari 2026', jumlah: 224400, penerima: 'Tira Hidayat' },
-                    { id: 'tx4', noBukti: 'BPU04', tanggal: '2026-01-23', uraian: 'Pembayaran Internet ASTINET MURNI 1:1 Bandwith: 1 Mbps', jumlah: 100000, penerima: 'Telkom' },
-                    { id: 'tx5', noBukti: 'BPU05', tanggal: '2026-01-23', uraian: 'Pembayaran Listrik Golongan P1-Daya 6.600 VA 200 kVA', jumlah: 198900, penerima: 'PLN' },
                     { id: 'tx6', noBukti: 'BPU06', tanggal: '2026-01-24', uraian: 'Pembelian Kertas HVS A4 70gr 2 Rim', jumlah: 100000, penerima: '' },
                     { id: 'tx7', noBukti: 'BPU06', tanggal: '2026-01-24', uraian: 'Pembelian Tinta Printer Epson Hitam 2 Botol', jumlah: 150000, penerima: '' }
                 ];
@@ -131,12 +128,148 @@
                 setBpuList(list);
             }, [groupedByBukti, groupOptions, penerimaMap]);
 
+            // MESIN PARSER BARU (Sangat Presisi Menggunakan Baris Koordinat & Regex)
             const handleFileUpload = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
                 setIsPdfLoading(true);
-                setTimeout(() => {
-                    loadDemoData();
+
+                try {
+                    const fileReader = new FileReader();
+                    fileReader.onload = async function() {
+                        try {
+                            const typedarray = new Uint8Array(this.result);
+                            const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                            let extractedTransactions = [];
+                            let txCounter = 1;
+
+                            for (let i = 1; i <= pdf.numPages; i++) {
+                                const page = await pdf.getPage(i);
+                                const textContent = await page.getTextContent();
+                                
+                                // Kelompokkan text berdasarkan Tinggi Baris (Y-axis)
+                                const rowsMap = {};
+                                textContent.items.forEach(item => {
+                                    let str = item.str.trim();
+                                    str = str.replace(/\s+/g, ' ');
+                                    if (!str) return;
+                                    const y = Math.round(item.transform[5] / 4) * 4; // Toleransi kemiringan 4 pixel
+                                    if (!rowsMap[y]) rowsMap[y] = [];
+                                    rowsMap[y].push({ str: str, x: item.transform[4] });
+                                });
+
+                                // Sortir baris dari atas ke bawah
+                                const sortedY = Object.keys(rowsMap).sort((a, b) => b - a);
+
+                                for (let yIndex = 0; yIndex < sortedY.length; yIndex++) {
+                                    const y = sortedY[yIndex];
+                                    // Sortir kata dari kiri ke kanan
+                                    const rowItems = rowsMap[y].sort((a, b) => a.x - b.x);
+                                    let rowString = rowItems.map(i => i.str).join(' ').replace(/\s+/g, ' ').trim();
+                                    
+                                    // Hanya ambil baris yang mengandung BPU
+                                    if (rowString.includes('BPU')) {
+                                        let tanggal = '';
+                                        const dateMatch = rowString.match(/(\d{2}-\d{2}-\d{4})/);
+                                        if (dateMatch) {
+                                            const parts = dateMatch[1].split('-');
+                                            tanggal = `${parts[2]}-${parts[1]}-${parts[0]}`;
+                                        }
+
+                                        let noBukti = '';
+                                        const bpuMatch = rowString.match(/(BPU[\w.-]*)/);
+                                        if (bpuMatch) {
+                                            noBukti = bpuMatch[1].replace(/[^A-Za-z0-9.-]/g, '');
+                                        }
+
+                                        if (!noBukti) continue; // Skip jika tidak ada BPU terbaca
+
+                                        // Cari angka nominal pengeluaran di bagian kanan baris
+                                        const amountsMatch = rowString.match(/((?:\d{1,3}(?:\.\d{3})*|0))\s+((?:\d{1,3}(?:\.\d{3})*|0))\s+((?:\d{1,3}(?:\.\d{3})*|0))$/);
+                                        let pengeluaran = 0;
+                                        let lastAmountIndex = rowString.length;
+                                        
+                                        if (amountsMatch) {
+                                            pengeluaran = parseInt(amountsMatch[2].replace(/\./g, ''), 10);
+                                            lastAmountIndex = amountsMatch.index;
+                                        } else {
+                                            const amountsMatch2 = rowString.match(/((?:\d{1,3}(?:\.\d{3})*|0))\s+((?:\d{1,3}(?:\.\d{3})*|0))$/);
+                                            if (amountsMatch2) {
+                                                pengeluaran = parseInt(amountsMatch2[1].replace(/\./g, ''), 10);
+                                                lastAmountIndex = amountsMatch2.index;
+                                            }
+                                        }
+
+                                        // Ambil Uraian yang berada di tengah (Di antara No Bukti & Angka)
+                                        let uraian = '';
+                                        const bpuIndex = rowString.indexOf(noBukti);
+                                        if (bpuIndex !== -1 && lastAmountIndex > bpuIndex) {
+                                            uraian = rowString.substring(bpuIndex + noBukti.length, lastAmountIndex).trim();
+                                        }
+
+                                        // Cek jika uraian terpotong dan lanjut ke baris berikutnya
+                                        let peekIndex = yIndex + 1;
+                                        while (peekIndex < sortedY.length) {
+                                            const nextRowString = rowsMap[sortedY[peekIndex]].sort((a, b) => a.x - b.x).map(i => i.str).join(' ').replace(/\s+/g, ' ').trim();
+                                            
+                                            // Jika baris bawahnya mengandung Tgl/Nominal/BPU, artinya itu transaksi baru
+                                            const hasDate = /\d{2}-\d{2}-\d{4}/.test(nextRowString);
+                                            const hasAmounts = /((?:\d{1,3}(?:\.\d{3})*|0))\s+((?:\d{1,3}(?:\.\d{3})*|0))$/.test(nextRowString);
+                                            const hasBpu = /BPU/.test(nextRowString);
+                                            const isOtherTx = /(BBU|SSP|Tarik|Pajak|Bunga|Admin)/i.test(nextRowString);
+
+                                            if (hasDate || hasAmounts || hasBpu || isOtherTx) {
+                                                break;
+                                            }
+
+                                            uraian += ' ' + nextRowString;
+                                            yIndex++; // Konsumsi baris
+                                            peekIndex++;
+                                        }
+
+                                        // Tebak nama penerima (Biasanya sebelum buka kurung NIK)
+                                        let penerima = '';
+                                        if (uraian.includes('(')) {
+                                            penerima = uraian.split('(')[0].trim();
+                                            penerima = penerima.replace(/[-:]+$/, '').trim();
+                                        }
+
+                                        if (pengeluaran > 0) {
+                                            extractedTransactions.push({
+                                                id: 'tx' + txCounter++,
+                                                noBukti,
+                                                tanggal,
+                                                uraian,
+                                                jumlah: pengeluaran,
+                                                penerima: penerima || ''
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (extractedTransactions.length > 0) {
+                                const initialMap = {};
+                                extractedTransactions.forEach(tx => { if(tx.penerima) initialMap[tx.noBukti] = tx.penerima; });
+                                setPenerimaMap(initialMap);
+                                setRawTransactions(extractedTransactions);
+                                setStep(2);
+                            } else {
+                                alert("Tidak menemukan data Pengeluaran (BPU) di PDF ini. Pastikan format BKU ARKAS benar.");
+                            }
+                        } catch (err) {
+                            console.error("Error parsing PDF:", err);
+                            alert("Gagal memproses teks PDF.");
+                        } finally {
+                            setIsPdfLoading(false);
+                        }
+                    };
+                    fileReader.readAsArrayBuffer(file);
+                } catch (error) {
+                    console.error("Error reading file:", error);
+                    alert("Gagal membaca file PDF.");
                     setIsPdfLoading(false);
-                }, 1000);
+                }
             };
 
             const handleUpdatePenerima = (targetId, namaToko) => {
